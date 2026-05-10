@@ -2,6 +2,7 @@ package com.example.a216372_izwan_lab01
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.*
@@ -94,6 +95,22 @@ class MainActivity : ComponentActivity() {
                     composable("detail") {
                         DetailScreen(navController, viewModel)
                     }
+
+                    composable("add_note") {
+                        AddPlaceNoteScreen(navController, viewModel)
+                    }
+
+                    composable("saved") {
+                        SavedPlacesScreen(navController, viewModel)
+                    }
+
+                    composable("insights") {
+                        MobilityInsightsScreen(navController, viewModel)
+                    }
+
+                    composable("nearby_restaurants") {
+                        NearbyRestaurantsScreen(navController, viewModel)
+                    }
                 }
             }
         }
@@ -110,6 +127,34 @@ data class PlaceUI(
     val reviewsCount: Int?
 )
 
+data class SavedPlace(
+    val id: Long,
+    val placeId: String,
+    val name: String,
+    val address: String,
+    val category: String,
+    val note: String,
+    val createdAt: String,
+    val latitude: Double?,
+    val longitude: Double?,
+    val rating: Double?,
+    val reviewsCount: Int?
+)
+
+private fun SavedPlace.toPlaceUIOrNull(): PlaceUI? {
+    val lat = latitude ?: return null
+    val lng = longitude ?: return null
+    return PlaceUI(
+        placeId = placeId.ifBlank { "saved_${id}" },
+        name = name,
+        address = address,
+        latLng = LatLng(lat, lng),
+        rating = rating,
+        distanceKm = 0.0,
+        reviewsCount = reviewsCount
+    )
+}
+
 /** Rich fields from a follow-up Place Details request (must match requested Place.Field mask). */
 data class PlaceDetailFields(
     val phone: String?,
@@ -117,6 +162,17 @@ data class PlaceDetailFields(
     val isOpenNow: Boolean?,
     val typeDisplay: String?,
     val userRatingCount: Int?
+)
+
+data class NearbyRestaurantUI(
+    val placeId: String,
+    val name: String,
+    val address: String,
+    val latLng: LatLng,
+    val rating: Double?,
+    val userRatingCount: Int?,
+    val distanceKm: Double,
+    val isOpenNow: Boolean?
 )
 
 private fun googleLocalDateToJava(d: com.google.android.libraries.places.api.model.LocalDate): LocalDate =
@@ -323,11 +379,22 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            FunctionItem(Icons.Default.Home, "Booking")
-                            FunctionItem(Icons.Default.Place, "Satellite")
-                            FunctionItem(Icons.Default.Star, "Drive")
-                            FunctionItem(Icons.Default.Info, "Weather")
-                            FunctionItem(Icons.Default.Favorite, "Fav")
+                            FunctionItem(Icons.Default.Home, "Home") {
+                                navController.navigate("home")
+                            }
+                            FunctionItem(Icons.Default.EditNote, "Add") {
+                                viewModel.savedPlaceBeingEdited = null
+                                navController.navigate("add_note")
+                            }
+                            FunctionItem(Icons.Default.Favorite, "Favs") {
+                                navController.navigate("saved")
+                            }
+                            FunctionItem(Icons.Default.Insights, "Stats") {
+                                navController.navigate("insights")
+                            }
+                            FunctionItem(Icons.Default.Restaurant, "Food") {
+                                navController.navigate("nearby_restaurants")
+                            }
                         }
 
                         Spacer(Modifier.height(16.dp))
@@ -336,7 +403,11 @@ fun HomeScreen(
 
                         if (sheetExpanded) {
                             Spacer(Modifier.height(16.dp))
-                            ExpandedContent()
+                            ExpandedContent(
+                                onRestaurantsClick = {
+                                    navController.navigate("nearby_restaurants")
+                                }
+                            )
                         }
                     }
                 }
@@ -382,9 +453,15 @@ fun HomeScreen(
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                BottomNavItem(Icons.Default.Home, "Travel", true)
-                BottomNavItem(Icons.AutoMirrored.Filled.List, "Explore", false)
-                BottomNavItem(Icons.Default.Person, "Me", false)
+                BottomNavItem(Icons.Default.Home, "Travel", true) {
+                    navController.navigate("home")
+                }
+                BottomNavItem(Icons.AutoMirrored.Filled.List, "Saved", false) {
+                    navController.navigate("saved")
+                }
+                BottomNavItem(Icons.Default.Person, "Insights", false) {
+                    navController.navigate("insights")
+                }
             }
         }
 
@@ -583,6 +660,7 @@ fun HomeScreen(
                                         .fillMaxWidth()
                                         .padding(vertical = 6.dp)
                                         .clickable {
+                                            viewModel.reopenSearchAfterDetailClose = true
                                             viewModel.setPlace(place)
                                             isSearchOpen = false
                                             navController.navigate("detail")
@@ -731,9 +809,10 @@ fun SearchEmptyState(
 }
 
 @Composable
-fun FunctionItem(icon: ImageVector, label: String) {
+fun FunctionItem(icon: ImageVector, label: String, onClick: () -> Unit = {}) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable { onClick() }
     ) {
 
         Box(
@@ -777,11 +856,14 @@ fun CommuteCard() {
 }
 
 @Composable
-fun BottomNavItem(icon: ImageVector, label: String, selected: Boolean) {
+fun BottomNavItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit = {}) {
 
     val color = if (selected) Color(0xFF4D7CFF) else Color.Gray
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable { onClick() }
+    ) {
 
         Icon(icon, contentDescription = label, tint = color)
 
@@ -804,7 +886,7 @@ fun FloatingButton(icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-fun ExpandedContent() {
+fun ExpandedContent(onRestaurantsClick: () -> Unit = {}) {
 
     Row(
         Modifier.fillMaxWidth(),
@@ -835,7 +917,8 @@ fun ExpandedContent() {
             RecommendationCard(
                 "Restaurants",
                 R.drawable.activity3,
-                modifier = Modifier.height(94.dp)
+                modifier = Modifier.height(94.dp),
+                onClick = onRestaurantsClick
             )
         }
     }
@@ -845,10 +928,11 @@ fun ExpandedContent() {
 fun RecommendationCard(
     title: String,
     image: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
 ) {
     Card(
-        modifier = modifier.clickable { },
+        modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp)
     ) {
         Box {
@@ -867,6 +951,251 @@ fun RecommendationCard(
                     .padding(8.dp)
             )
         }
+    }
+}
+
+@Composable
+fun NearbyRestaurantSection(
+    restaurants: List<NearbyRestaurantUI>,
+    isLoading: Boolean,
+    photoMap: Map<String, Bitmap>,
+    onRestaurantClick: (NearbyRestaurantUI) -> Unit = {}
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 220.dp, max = 700.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F))
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Nearby Restaurants (Open)", color = Color.White, style = MaterialTheme.typography.titleMedium)
+            Text("Showing up to 10 results", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                restaurants.isEmpty() -> {
+                    Text("No open restaurants found nearby.", color = Color.Gray)
+                }
+                else -> {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(restaurants, key = { it.placeId }) { item ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.clickable { onRestaurantClick(item) }
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    val bmp = photoMap[item.placeId]
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(170.dp)
+                                                .clip(RoundedCornerShape(12.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        AsyncImage(
+                                            model = R.drawable.activity3,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(170.dp)
+                                                .clip(RoundedCornerShape(12.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(item.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                    Text(item.address, color = Color(0xFFB0BEC5), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "⭐ ${item.rating?.let { "%.1f".format(it) } ?: "N/A"} (${item.userRatingCount ?: "N/A"}) • ${"%.1f".format(item.distanceKm)} km",
+                                        color = Color(0xFFFFC107)
+                                    )
+                                    Text(
+                                        when (item.isOpenNow) {
+                                            true -> "Open now"
+                                            false -> "Closed"
+                                            null -> "Hours not available"
+                                        },
+                                        color = when (item.isOpenNow) {
+                                            true -> Color(0xFF66BB6A)
+                                            false -> Color(0xFFE57373)
+                                            null -> Color.Gray
+                                        },
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+fun NearbyRestaurantsScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val context = LocalContext.current
+    val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+
+    var userLocation by remember { mutableStateOf<LatLng?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var restaurants by remember { mutableStateOf(listOf<NearbyRestaurantUI>()) }
+    val photoMap = remember { mutableStateMapOf<String, Bitmap>() }
+
+    LaunchedEffect(Unit) {
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            location?.let {
+                userLocation = LatLng(it.latitude, it.longitude)
+            }
+        }
+    }
+
+    LaunchedEffect(userLocation) {
+        if (userLocation == null) return@LaunchedEffect
+        val placesClient = Places.createClient(context)
+        isLoading = true
+        restaurants = emptyList()
+        photoMap.clear()
+
+        val center = userLocation ?: return@LaunchedEffect
+        val delta = 0.15
+        val sw = LatLng(center.latitude - delta, center.longitude - delta)
+        val ne = LatLng(center.latitude + delta, center.longitude + delta)
+
+        val request = FindAutocompletePredictionsRequest.builder()
+            .setQuery("restaurant")
+            .setLocationBias(com.google.android.libraries.places.api.model.RectangularBounds.newInstance(sw, ne))
+            .setTypesFilter(listOf("restaurant"))
+            .build()
+
+        placesClient.findAutocompletePredictions(request)
+            .addOnSuccessListener { response ->
+                val candidates = mutableMapOf<String, NearbyRestaurantUI>()
+                response.autocompletePredictions.take(100).forEach { prediction ->
+                    val detailFields = listOf(
+                        Place.Field.ID,
+                        Place.Field.LOCATION,
+                        Place.Field.FORMATTED_ADDRESS,
+                        Place.Field.RATING,
+                        Place.Field.USER_RATING_COUNT,
+                        Place.Field.TYPES,
+                        Place.Field.OPENING_HOURS,
+                        Place.Field.CURRENT_OPENING_HOURS,
+                        Place.Field.UTC_OFFSET,
+                        Place.Field.PHOTO_METADATAS
+                    )
+                    val placeRequest = FetchPlaceRequest.builder(prediction.placeId, detailFields).build()
+                    placesClient.fetchPlace(placeRequest)
+                        .addOnSuccessListener { placeResponse ->
+                            val p = placeResponse.place
+                            val latLng = p.location ?: return@addOnSuccessListener
+                            val types = p.placeTypes ?: emptyList()
+                            if ("restaurant" !in types) return@addOnSuccessListener
+                            val openNow = computeIsOpenNow(p)
+                            if (openNow != true) return@addOnSuccessListener
+
+                            val distance = userLocation?.let {
+                                calculateDistance(
+                                    it.latitude, it.longitude,
+                                    latLng.latitude, latLng.longitude
+                                )
+                            } ?: 0.0
+
+                            candidates[prediction.placeId] =
+                                NearbyRestaurantUI(
+                                    placeId = prediction.placeId,
+                                    name = prediction.getPrimaryText(null).toString(),
+                                    address = p.formattedAddress ?: "",
+                                    latLng = latLng,
+                                    rating = p.rating,
+                                    userRatingCount = p.userRatingCount,
+                                    distanceKm = distance,
+                                    isOpenNow = openNow
+                                )
+
+                            p.photoMetadatas?.firstOrNull()?.let { metadata ->
+                                val photoReq = FetchPhotoRequest.builder(metadata)
+                                    .setMaxWidth(900)
+                                    .setMaxHeight(450)
+                                    .build()
+                                placesClient.fetchPhoto(photoReq)
+                                    .addOnSuccessListener { photoResp ->
+                                        photoMap[prediction.placeId] = photoResp.bitmap
+                                    }
+                            }
+
+                            restaurants = candidates.values
+                                .sortedBy { it.distanceKm }
+                                .take(10)
+                            if (restaurants.size >= 10) isLoading = false
+                        }
+                }
+                isLoading = false
+            }
+            .addOnFailureListener {
+                isLoading = false
+            }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121820))
+            .statusBarsPadding()
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Nearby Restaurants", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close",
+                tint = Color.White,
+                modifier = Modifier.clickable { navController.popBackStack() }
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        NearbyRestaurantSection(
+            restaurants = restaurants,
+            isLoading = isLoading,
+            photoMap = photoMap,
+            onRestaurantClick = { item ->
+                viewModel.reopenSearchAfterDetailClose = false
+                viewModel.setPlace(
+                    PlaceUI(
+                        placeId = item.placeId,
+                        name = item.name,
+                        address = item.address,
+                        latLng = item.latLng,
+                        rating = item.rating,
+                        distanceKm = item.distanceKm,
+                        reviewsCount = item.userRatingCount
+                    )
+                )
+                navController.navigate("detail")
+            }
+        )
     }
 }
 
@@ -1070,7 +1399,10 @@ fun DetailScreen(
                                 .size(24.dp)
                                 .clickable {
                                     viewModel.setPlace(null)
-                                    viewModel.isSearchOpen = true
+                                    if (viewModel.reopenSearchAfterDetailClose) {
+                                        viewModel.isSearchOpen = true
+                                    }
+                                    viewModel.reopenSearchAfterDetailClose = false
                                     navController.popBackStack()
                                 }
                         )
@@ -1363,6 +1695,465 @@ fun DetailExpandedContent(
                 R.drawable.activity3,
                 modifier = Modifier.height(84.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun HomeMenuScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val darkBg = Color(0xFF121820)
+    val cardBg = Color(0xFF1F2A36)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(darkBg)
+            .statusBarsPadding()
+            .padding(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                "SDG 11: Smart City Mobility",
+                color = Color.White,
+                style = MaterialTheme.typography.headlineSmall
+            )
+            Text(
+                "Find places efficiently, reduce unnecessary travel, and improve daily navigation planning.",
+                color = Color(0xFFB0BEC5)
+            )
+
+            MenuCard("Start Map Navigation", "Search and view place details", Icons.Default.Map, cardBg) {
+                navController.navigate("home")
+            }
+            MenuCard("Add Place Note", "Log useful observations from a location", Icons.Default.EditNote, cardBg) {
+                viewModel.savedPlaceBeingEdited = null
+                navController.navigate("add_note")
+            }
+            MenuCard("Favourite Places", "See your saved favourites", Icons.Default.Favorite, cardBg) {
+                navController.navigate("saved")
+            }
+            MenuCard("Mobility Insights", "Simple processing from your saved data", Icons.Default.Insights, cardBg) {
+                navController.navigate("insights")
+            }
+        }
+    }
+}
+
+@Composable
+fun MenuCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = color),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = Color(0xFF5AA8FF))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(title, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = Color(0xFF90A4AE), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+fun AddPlaceNoteScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val context = LocalContext.current
+    val editing = viewModel.savedPlaceBeingEdited
+    val selected = viewModel.selectedPlace
+    val formKey = Pair(editing?.id, selected?.placeId)
+    val seedPicked = editing?.toPlaceUIOrNull() ?: selected
+
+    var pickedPlace by remember(formKey) { mutableStateOf<PlaceUI?>(seedPicked) }
+    var locationQuery by remember(formKey) {
+        mutableStateOf(seedPicked?.name ?: editing?.name ?: selected?.name ?: "")
+    }
+    var locationCandidates by remember(formKey) { mutableStateOf(listOf<PlaceUI>()) }
+
+    var name by remember(formKey) { mutableStateOf(editing?.name ?: selected?.name ?: "") }
+    var address by remember(formKey) { mutableStateOf(editing?.address ?: selected?.address ?: "") }
+    var category by remember(formKey) { mutableStateOf(editing?.category ?: "Accessibility") }
+    var note by remember(formKey) { mutableStateOf(editing?.note ?: "") }
+
+    val categories = listOf("Accessibility", "Traffic", "Public Transport", "Safety", "Eco Spot")
+
+    BackHandler {
+        viewModel.savedPlaceBeingEdited = null
+        navController.popBackStack()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121820))
+            .statusBarsPadding()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            if (editing != null) "Edit Favourite Place" else "Add Place Note",
+            color = Color.White,
+            style = MaterialTheme.typography.headlineSmall
+        )
+        Text("Form Input screen for your SDG 11 workflow.", color = Color(0xFFB0BEC5))
+
+        fun searchLocations() {
+            val query = locationQuery.trim()
+            if (query.isBlank()) {
+                locationCandidates = emptyList()
+                return
+            }
+            val placesClient = Places.createClient(context)
+            val req = FindAutocompletePredictionsRequest.builder()
+                .setQuery(query)
+                .build()
+            placesClient.findAutocompletePredictions(req)
+                .addOnSuccessListener { response ->
+                    val candidates = mutableListOf<PlaceUI>()
+                    response.autocompletePredictions.take(6).forEach { prediction ->
+                        val placeReq = FetchPlaceRequest.builder(
+                            prediction.placeId,
+                            listOf(
+                                Place.Field.ID,
+                                Place.Field.LOCATION,
+                                Place.Field.FORMATTED_ADDRESS,
+                                Place.Field.RATING,
+                                Place.Field.USER_RATING_COUNT
+                            )
+                        ).build()
+                        placesClient.fetchPlace(placeReq)
+                            .addOnSuccessListener { placeResp ->
+                                val p = placeResp.place
+                                val latLng = p.location ?: return@addOnSuccessListener
+                                candidates.add(
+                                    PlaceUI(
+                                        placeId = prediction.placeId,
+                                        name = prediction.getPrimaryText(null).toString(),
+                                        address = p.formattedAddress ?: "",
+                                        latLng = latLng,
+                                        rating = p.rating,
+                                        distanceKm = 0.0,
+                                        reviewsCount = p.userRatingCount
+                                    )
+                                )
+                                locationCandidates = candidates.toList()
+                            }
+                    }
+                }
+        }
+
+        OutlinedTextField(
+            value = locationQuery,
+            onValueChange = { locationQuery = it },
+            label = { Text("Search Real Location") },
+            trailingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.clickable { searchLocations() }
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        if (pickedPlace != null) {
+            Text(
+                "Selected location: ${pickedPlace!!.name}",
+                color = Color(0xFF66BB6A),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        if (locationCandidates.isNotEmpty()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(locationCandidates) { candidate ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2A36)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                pickedPlace = candidate
+                                name = candidate.name
+                                address = candidate.address
+                                locationQuery = candidate.name
+                                locationCandidates = emptyList()
+                            }
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(candidate.name, color = Color.White)
+                            Text(candidate.address, color = Color(0xFFB0BEC5), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Place Name") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = address,
+            onValueChange = { address = it },
+            label = { Text("Address") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = category,
+            onValueChange = { category = it },
+            label = { Text("Category") },
+            supportingText = { Text("Example: ${categories.joinToString(", ")}") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it },
+            label = { Text("Observation Note") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Button(
+            onClick = {
+                if (name.isBlank()) return@Button
+                val editingNow = viewModel.savedPlaceBeingEdited
+                if (editingNow != null) {
+                    val source = pickedPlace ?: editingNow.toPlaceUIOrNull()
+                    viewModel.updateSavedPlace(
+                        SavedPlace(
+                            id = editingNow.id,
+                            placeId = source?.placeId ?: editingNow.placeId,
+                            name = name,
+                            address = address.ifBlank { "N/A" },
+                            category = category.ifBlank { "General" },
+                            note = note.ifBlank { "No note" },
+                            createdAt = editingNow.createdAt,
+                            latitude = source?.latLng?.latitude ?: editingNow.latitude,
+                            longitude = source?.latLng?.longitude ?: editingNow.longitude,
+                            rating = source?.rating ?: editingNow.rating,
+                            reviewsCount = source?.reviewsCount ?: editingNow.reviewsCount
+                        )
+                    )
+                    viewModel.savedPlaceBeingEdited = null
+                    navController.popBackStack()
+                } else {
+                    val source = pickedPlace ?: selected
+                    viewModel.addSavedPlace(
+                        SavedPlace(
+                            id = System.currentTimeMillis(),
+                            placeId = source?.placeId ?: "",
+                            name = name,
+                            address = address.ifBlank { "N/A" },
+                            category = category.ifBlank { "General" },
+                            note = note.ifBlank { "No note" },
+                            createdAt = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm").format(java.util.Date()),
+                            latitude = source?.latLng?.latitude,
+                            longitude = source?.latLng?.longitude,
+                            rating = source?.rating,
+                            reviewsCount = source?.reviewsCount
+                        )
+                    )
+                    navController.navigate("saved")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (editing != null) "Update Favourite" else "Save Note")
+        }
+
+        OutlinedButton(
+            onClick = {
+                viewModel.savedPlaceBeingEdited = null
+                navController.popBackStack()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Back")
+        }
+    }
+}
+
+@Composable
+fun SavedPlacesScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val items = viewModel.savedPlaces
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121820))
+            .statusBarsPadding()
+            .padding(16.dp)
+    ) {
+        Text("Favourite Places", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+        Text("${items.size} saved favourite${if (items.size == 1) "" else "s"}", color = Color(0xFFB0BEC5))
+        Spacer(Modifier.height(12.dp))
+
+        if (items.isEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2A36)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "No favourites yet. Add one from Add Place Note on the home map.",
+                    color = Color.White,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(items, key = { it.id }) { item ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2A36)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    item.name,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "View favourite on map",
+                                        tint = Color(0xFFE57373),
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clickable {
+                                                val lat = item.latitude
+                                                val lng = item.longitude
+                                                if (lat != null && lng != null) {
+                                                    viewModel.reopenSearchAfterDetailClose = false
+                                                    viewModel.setPlace(
+                                                        PlaceUI(
+                                                            placeId = item.placeId.ifBlank { "saved_${item.id}" },
+                                                            name = item.name,
+                                                            address = item.address,
+                                                            latLng = LatLng(lat, lng),
+                                                            rating = item.rating,
+                                                            distanceKm = 0.0,
+                                                            reviewsCount = item.reviewsCount
+                                                        )
+                                                    )
+                                                    navController.navigate("detail")
+                                                }
+                                            }
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit favourite",
+                                        tint = Color(0xFF5AA8FF),
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clickable {
+                                                viewModel.savedPlaceBeingEdited = item
+                                                navController.navigate("add_note")
+                                            }
+                                    )
+                                }
+                            }
+                            Text(item.address, color = Color(0xFFB0BEC5))
+                            Spacer(Modifier.height(6.dp))
+                            Text("Category: ${item.category}", color = Color(0xFF5AA8FF))
+                            Text(item.note, color = Color.White)
+                            if (item.latitude != null && item.longitude != null) {
+                                Text(
+                                    "Saved coordinates: %.5f, %.5f".format(item.latitude, item.longitude),
+                                    color = Color(0xFF90A4AE),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                Text(
+                                    "No coordinates stored for this item.",
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("Added: ${item.createdAt}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = { navController.navigate("home") }, modifier = Modifier.fillMaxWidth()) {
+            Text("Back To Home")
+        }
+    }
+}
+
+@Composable
+fun MobilityInsightsScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val items = viewModel.savedPlaces
+    val categoryCount = items.groupingBy { it.category }.eachCount().toList().sortedByDescending { it.second }
+    val topCategory = categoryCount.firstOrNull()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121820))
+            .statusBarsPadding()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Mobility Insights", color = Color.White, style = MaterialTheme.typography.headlineSmall)
+        Text("Calculation / Processing screen for SDG 11 data.", color = Color(0xFFB0BEC5))
+
+        MenuCard(
+            title = "Total Logged Places: ${items.size}",
+            subtitle = "Tracks user-observed mobility issues and points of interest.",
+            icon = Icons.Default.Analytics,
+            color = Color(0xFF1F2A36)
+        ) {}
+
+        MenuCard(
+            title = "Top Category: ${topCategory?.first ?: "N/A"}",
+            subtitle = "Count: ${topCategory?.second ?: 0}",
+            icon = Icons.Default.Category,
+            color = Color(0xFF1F2A36)
+        ) {}
+
+        MenuCard(
+            title = "Problem Statement (SDG 11)",
+            subtitle = "Urban users often spend extra time locating suitable destinations. Better mapping + personal logging can improve travel decisions and reduce inefficient movement.",
+            icon = Icons.Default.Description,
+            color = Color(0xFF1F2A36)
+        ) {}
+
+        Spacer(Modifier.weight(1f))
+        OutlinedButton(onClick = { navController.navigate("home") }, modifier = Modifier.fillMaxWidth()) {
+            Text("Back To Home")
         }
     }
 }

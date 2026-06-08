@@ -1,19 +1,33 @@
 package com.example.a216372_izwan_lab01
-import androidx.lifecycle.ViewModel
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 
-class PlaceViewModel : ViewModel() {
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.a216372_izwan_lab01.data.SavedPlaceRepository
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+class PlaceViewModel(
+    private val savedPlaceRepository: SavedPlaceRepository
+) : ViewModel() {
 
     var selectedPlace by mutableStateOf<PlaceUI?>(null)
     var isSearchOpen by mutableStateOf(false)
     var searchText by mutableStateOf("")
     var placesList by mutableStateOf(listOf<PlaceUI>())
-    var savedPlaces by mutableStateOf(listOf<SavedPlace>())
-    /** When set, [AddPlaceNoteScreen] opens in edit mode for this item. */
+
+    val savedPlaces: StateFlow<List<SavedPlace>> = savedPlaceRepository.observeSavedPlaces()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
     var savedPlaceBeingEdited by mutableStateOf<SavedPlace?>(null)
-    /** When true, closing [DetailScreen] should reopen the home search overlay (search flow only). */
     var reopenSearchAfterDetailClose by mutableStateOf(false)
 
     fun setPlace(place: PlaceUI?) {
@@ -21,10 +35,14 @@ class PlaceViewModel : ViewModel() {
     }
 
     fun addSavedPlace(item: SavedPlace) {
-        savedPlaces = listOf(item) + savedPlaces
+        viewModelScope.launch {
+            savedPlaceRepository.insert(item)
+        }
     }
 
     fun updateSavedPlace(item: SavedPlace) {
-        savedPlaces = savedPlaces.map { if (it.id == item.id) item else it }
+        viewModelScope.launch {
+            savedPlaceRepository.update(item)
+        }
     }
 }

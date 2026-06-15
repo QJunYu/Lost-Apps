@@ -69,6 +69,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.*
 import androidx.navigation.NavController
+import com.example.a216372_izwan_lab01.data.CommunityPlace
 import android.graphics.Bitmap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.BasicTextField
@@ -131,6 +132,10 @@ class MainActivity : ComponentActivity() {
                         MobilityInsightsScreen(navController, viewModel)
                     }
 
+                    composable("community") {
+                        CommunityPopularScreen(navController, viewModel)
+                    }
+
                     composable("nearby_restaurants") {
                         NearbyRestaurantsScreen(navController, viewModel)
                     }
@@ -184,6 +189,9 @@ data class SavedPlace(
     val rating: Double?,
     val reviewsCount: Int?
 )
+
+/** Community heart count display: caps at "99+". */
+private fun formatHeartCount(count: Long): String = if (count > 99) "99+" else count.toString()
 
 private fun SavedPlace.toPlaceUIOrNull(): PlaceUI? {
     val lat = latitude ?: return null
@@ -886,6 +894,9 @@ fun CommuteCard() {
 }
 
 private fun NavController.navigateToMainTab(route: String) {
+    if (currentDestination?.route == route) return
+    // If this tab is already in the back stack (e.g. Home), return straight to it.
+    if (popBackStack(route, inclusive = false)) return
     navigate(route) {
         popUpTo(graph.startDestinationId) {
             saveState = true
@@ -1336,6 +1347,8 @@ fun DetailScreen(
 
     val place = viewModel.selectedPlace
     val context = LocalContext.current
+    val heartCounts by viewModel.communityHeartCounts.collectAsStateWithLifecycle()
+    val heartedIds by viewModel.heartedPlaceIds.collectAsStateWithLifecycle()
     var sheetExpanded by remember { mutableStateOf(false) }
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val detailSheetHeight by animateDpAsState(
@@ -1574,6 +1587,59 @@ fun DetailScreen(
                         })",
                         color = Color.White
                     )
+
+                    place?.let { p ->
+                        val pid = p.placeId
+                        val heartCount = heartCounts[pid] ?: 0L
+                        val alreadyHearted = pid.isNotBlank() && heartedIds.contains(pid)
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (alreadyHearted) Color(0xFFE57373).copy(alpha = 0.18f) else Color(0xFF1F2A36),
+                                modifier = Modifier.clickable(enabled = pid.isNotBlank() && !alreadyHearted) {
+                                    viewModel.heartPlaceFromDetail(p)
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (alreadyHearted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "Add to favourites",
+                                        tint = Color(0xFFE57373),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        if (alreadyHearted) "Favourited" else "Add to favourites",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Favorite,
+                                    contentDescription = null,
+                                    tint = Color(0xFFE57373),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    "${formatHeartCount(heartCount)} in community",
+                                    color = Color(0xFFB0BEC5),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(Modifier.height(10.dp))
                     Row(
@@ -1864,6 +1930,9 @@ fun HomeMenuScreen(navController: NavController, viewModel: PlaceViewModel) {
             MenuCard("Mobility Insights", "Simple processing from your saved data", Icons.Default.Insights, cardBg) {
                 navController.navigate("insights")
             }
+            MenuCard("Community Favourites", "See the most-loved places shared by everyone", Icons.Default.Groups, cardBg) {
+                navController.navigate("community")
+            }
         }
     }
 }
@@ -2125,6 +2194,25 @@ fun AddPlaceNoteScreen(navController: NavController, viewModel: PlaceViewModel) 
 @Composable
 fun SavedPlacesScreen(navController: NavController, viewModel: PlaceViewModel) {
     val items by viewModel.savedPlaces.collectAsStateWithLifecycle()
+    var pendingDelete by remember { mutableStateOf<SavedPlace?>(null) }
+
+    pendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove favourite?") },
+            text = { Text("Remove \"${target.name}\" from your favourites? This also takes back your community heart for this place.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSavedPlace(target)
+                    pendingDelete = null
+                }) { Text("Remove", color = Color(0xFFE57373)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2215,6 +2303,14 @@ fun SavedPlacesScreen(navController: NavController, viewModel: PlaceViewModel) {
                                                     navController.navigate("add_note")
                                                 }
                                         )
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove favourite",
+                                            tint = Color(0xFFE57373),
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clickable { pendingDelete = item }
+                                        )
                                     }
                                 }
                                 Text(item.address, color = Color(0xFFB0BEC5))
@@ -2288,6 +2384,139 @@ fun MobilityInsightsScreen(navController: NavController, viewModel: PlaceViewMod
                 icon = Icons.Default.Description,
                 color = Color(0xFF1F2A36)
             ) {}
+        }
+
+        AppFloatingBottomNavBar(navController = navController)
+    }
+}
+
+@Composable
+fun CommunityPopularScreen(navController: NavController, viewModel: PlaceViewModel) {
+    val popular by viewModel.popularPlaces.collectAsStateWithLifecycle()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121820))
+            .statusBarsPadding()
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { navController.popBackStack() }) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Community Favourites",
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            }
+            Text(
+                "Most-loved places by everyone using the app",
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+            )
+
+            if (popular.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "No community favourites yet.\nHeart a place to be the first!",
+                        color = Color(0xFF78909C),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(popular, key = { _, cp -> cp.placeId }) { index, cp ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2A36)),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val lat = cp.lat
+                                    val lng = cp.lng
+                                    if (lat != null && lng != null) {
+                                        viewModel.reopenSearchAfterDetailClose = false
+                                        viewModel.setPlace(
+                                            PlaceUI(
+                                                placeId = cp.placeId,
+                                                name = cp.name,
+                                                address = cp.address,
+                                                latLng = LatLng(lat, lng),
+                                                rating = cp.rating,
+                                                distanceKm = 0.0,
+                                                reviewsCount = cp.reviewsCount
+                                            )
+                                        )
+                                        navController.navigate("detail")
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "#${index + 1}",
+                                    color = Color(0xFF5AA8FF),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        cp.name,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        cp.address,
+                                        color = Color(0xFF90A4AE),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        tint = Color(0xFFE57373),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        formatHeartCount(cp.heartCount),
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         AppFloatingBottomNavBar(navController = navController)
@@ -3803,6 +4032,7 @@ fun DestinationExploreScreen(
     placeName: String,
 ) {
     val context = LocalContext.current
+    val communityHeartCounts by viewModel.communityHeartCounts.collectAsStateWithLifecycle()
     val decodedName = remember(placeName) {
         try { java.net.URLDecoder.decode(placeName, "UTF-8") } catch (e: Exception) { placeName }
     }
@@ -4160,6 +4390,7 @@ fun DestinationExploreScreen(
                                 place = place,
                                 photo = currentPhotoMap[place.placeId],
                                 showOpenBadge = selectedTab == ExploreTab.FOOD,
+                                heartCount = communityHeartCounts[place.placeId] ?: 0L,
                                 modifier = Modifier.weight(1f),
                                 onClick = { openExplorePlaceOnDetail(navController, viewModel, place) },
                             )
@@ -4206,6 +4437,7 @@ private fun ExplorePlaceCard(
     place: ExplorePlace,
     photo: Bitmap?,
     showOpenBadge: Boolean = true,
+    heartCount: Long = 0L,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
 ) {
@@ -4240,6 +4472,31 @@ private fun ExplorePlaceCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Image, contentDescription = null, tint = Color(0xFF546E7A), modifier = Modifier.size(32.dp))
+                    }
+                }
+                // Community hearts badge (top-start)
+                if (heartCount > 0) {
+                    Row(
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .align(Alignment.TopStart)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = Color(0xFFE57373),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            formatHeartCount(heartCount),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
                 // Open/Closed badge (food & drinks only)
